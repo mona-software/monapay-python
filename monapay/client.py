@@ -122,12 +122,18 @@ class PaymentProfile(_Resource):
 
 class Checkouts(_Resource):
     def create(
-        self, body: Mapping[str, Any], idempotency_key: Optional[str] = None
+        self,
+        body: Mapping[str, Any],
+        idempotency_key: Optional[str] = None,
+        sandbox: bool = False,
     ) -> Any:
+        request_body = dict(body)
+        if sandbox:
+            request_body["sandbox"] = True
         return self._client._request(
             "POST",
             "/api/v1/checkouts",
-            body=body,
+            body=request_body,
             headers={"Idempotency-Key": idempotency_key or str(uuid.uuid4())},
         )
 
@@ -218,6 +224,21 @@ class Transactions(_Resource):
             ),
             body=body,
         )
+
+
+class Sandbox(_Resource):
+    def transaction(
+        self,
+        amount: int,
+        description: Optional[str] = None,
+        virtual_account_number: Optional[str] = None,
+    ) -> Any:
+        body: Dict[str, Any] = {"amount": amount}
+        if description is not None:
+            body["description"] = description
+        if virtual_account_number is not None:
+            body["virtual_account_number"] = virtual_account_number
+        return self._client._request("POST", "/api/v1/sandbox/transactions", body=body)
 
 
 class Webhooks(_Resource):
@@ -363,6 +384,7 @@ class MonaPay:
         self.checkouts = Checkouts(self)
         self.qr = QrPayments(self)
         self.transactions = Transactions(self)
+        self.sandbox = Sandbox(self)
         self.webhooks = Webhooks(self)
         self.webhook_logs = WebhookLogs(self)
         self.email_configs = EmailConfigs(self)

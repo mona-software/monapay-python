@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: monapay
-Version: 0.5.0
+Version: 0.5.1
 Summary: SDK Python zero-dependency cho MONA Pay
 Author-email: The MONA Group <info@themona.global>
 License: MIT
@@ -39,17 +39,22 @@ print(checkout["checkout_url"])
 pip install monapay
 ```
 
-## Bắt đầu nhanh
+## Sử dụng
+
+Các sub-client tương ứng toàn bộ API: `me`, `keys`, `bankAccounts`, `virtualAccounts`, `qr`, `transactions`, `webhooks`, `webhookLogs`, `emailConfigs`, `emailLogs`, `checkouts`, `paymentProfile`, `sandbox`. Trong Python, các nhóm dùng snake_case như `bank_accounts`, `webhook_logs`, `email_configs`, `email_logs`, `payment_profile`; factory tương đương `MonaPay.fromEnv()` của Node là `MonaPay.from_env()`.
+
+Khởi tạo từ biến môi trường hoặc truyền credentials tường minh:
 
 ```python
 import os
 from monapay import MonaPay
 
-mona = MonaPay(
+mona = MonaPay.from_env()
+
+mona_explicit = MonaPay(
     client_id=os.environ["MONAPAY_CLIENT_ID"],
     client_secret=os.environ["MONAPAY_CLIENT_SECRET"],
 )
-# Hoặc: mona = MonaPay.from_env()
 
 # Tự lấy OAuth token và cache tới gần hạn.
 print(mona.me())
@@ -73,7 +78,35 @@ print(qr["qr_data_url"])
 
 `MonaPay.from_env()` ưu tiên `MONAPAY_CLIENT_ID` + `MONAPAY_CLIENT_SECRET`. Cách cũ `MonaPay(username, password)` hoặc `MONAPAY_USERNAME` + `MONAPAY_PASSWORD` vẫn được hỗ trợ, nhưng tài khoản bật 2FA không login bằng mật khẩu được. Client cache token theo `expires_in` (làm mới sớm 60 giây) và thử request đúng một lần khi gặp HTTP 401. Các method trả trực tiếp trường `data`; `ApiError` có `status` và `body`.
 
-Các nhóm method: `keys`, `va`, `bank_accounts`, `payment_profile`, `checkouts`, `qr`, `transactions`, `webhooks`, `webhook_logs`, `email_configs`, `email_logs`, `email_suppressions`. Tên method dùng snake_case, ví dụ `payment_profile.get/set`, `checkouts.create/get/list/cancel` và `email_configs.resend_verification(...)`. Alias `paymentProfile` có sẵn khi anh chị muốn giữ cùng tên với Node SDK.
+Các nhóm dùng snake_case; alias `paymentProfile` có sẵn khi anh chị muốn giữ cùng tên với Node SDK.
+
+| Sub-client | Method |
+| --- | --- |
+| `keys`, `bank_accounts` | `generate/list/destroy`, `list` |
+| `va` | `register/verify/register_notification/verify_notification/notification_detail/list` |
+| `payment_profile`, `checkouts` | `get/set`, `create/get/list/cancel` |
+| `qr` | `generate/cancel` |
+| `transactions` | `list/iterate/retry` |
+| `sandbox` | `transaction` |
+| `webhooks`, `webhook_logs` | `list/create/update/remove/test`, `list/stats` |
+| `email_configs`, `email_logs`, `email_suppressions` | `list/get/create/update/remove/verify/resend_verification/test`, `list/stats`, `list/remove` |
+
+## Thử bằng sandbox (không cần nối ngân hàng)
+
+```python
+checkout = mona.checkouts.create({
+    "amount": 10000, "order_code": "DH10234",
+    "return_url": "https://shop.vn/payment/return",
+}, sandbox=True)
+mona.sandbox.transaction(
+    virtual_account_number=checkout["bank"]["account_number"],
+    amount=checkout["amount"], description=checkout["order_code"],
+)
+paid = mona.checkouts.get(checkout["id"])
+print(paid["status"])  # "paid"
+```
+
+Webhook `CHECKOUT_PAID` có trường `checkout_id`, không phải `id` (tương ứng `event.checkout_id` trên object); với dict Python, dùng `event["checkout_id"]`.
 
 ## Nối ngân hàng bằng OTP (4 bước)
 

@@ -287,13 +287,15 @@ class ClientTests(unittest.TestCase):
         )
         client.payment_profile.get()
         client.paymentProfile.set({"display_name": "Shop MONA", "locale": "vi"})
+        checkout_body = {
+            "amount": 250000,
+            "order_code": "DH_10234",
+            "return_url": "https://shop.test/return",
+        }
         client.checkouts.create(
-            {
-                "amount": 250000,
-                "order_code": "DH_10234",
-                "return_url": "https://shop.test/return",
-            },
+            checkout_body,
             idempotency_key="create-key",
+            sandbox=True,
         )
         client.checkouts.get("checkout/id")
         client.checkouts.list(
@@ -316,6 +318,16 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(requests[2].full_url, "https://example.test/api/v1/checkouts")
         self.assertEqual(requests[2].get_header("Idempotency-key"), "create-key")
         self.assertEqual(
+            json.loads(requests[2].data),
+            {
+                "amount": 250000,
+                "order_code": "DH_10234",
+                "return_url": "https://shop.test/return",
+                "sandbox": True,
+            },
+        )
+        self.assertNotIn("sandbox", checkout_body)
+        self.assertEqual(
             requests[3].full_url,
             "https://example.test/api/v1/checkouts/checkout%2Fid",
         )
@@ -331,6 +343,55 @@ class ClientTests(unittest.TestCase):
         for request in requests:
             if request.method != "GET":
                 self.assertEqual(request.get_header("X-client-secret"), "client-secret")
+
+    @patch("urllib.request.urlopen")
+    def test_sandbox_transaction_maps_optional_fields(self, urlopen):
+        urlopen.side_effect = [
+            FakeResponse({"success": True, "data": {"access_token": "token"}}),
+            FakeResponse(
+                {
+                    "success": True,
+                    "data": {
+                        "transaction_code": "SANDBOX-1",
+                        "virtual_account_number": "SBX0001",
+                        "account_number": "0000000001",
+                        "amount": 10000,
+                        "sandbox": True,
+                        "is_sandbox": True,
+                    },
+                }
+            ),
+            FakeResponse({"success": True, "data": {"transaction_code": "SANDBOX-2"}}),
+        ]
+        client = MonaPay(
+            client_id="client-id",
+            client_secret="client-secret",
+            base_url="https://example.test",
+        )
+        result = client.sandbox.transaction(
+            amount=10000,
+            description="DH10234",
+            virtual_account_number="SBX0001",
+        )
+        client.sandbox.transaction(amount=5000)
+
+        request = urlopen.call_args_list[1].args[0]
+        self.assertEqual(
+            request.full_url, "https://example.test/api/v1/sandbox/transactions"
+        )
+        self.assertEqual(
+            json.loads(request.data),
+            {
+                "amount": 10000,
+                "description": "DH10234",
+                "virtual_account_number": "SBX0001",
+            },
+        )
+        self.assertEqual(request.get_header("X-client-secret"), "client-secret")
+        self.assertEqual(result["transaction_code"], "SANDBOX-1")
+        self.assertEqual(
+            json.loads(urlopen.call_args_list[2].args[0].data), {"amount": 5000}
+        )
 
 
 if __name__ == "__main__":
