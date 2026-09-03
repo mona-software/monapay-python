@@ -274,6 +274,64 @@ class ClientTests(unittest.TestCase):
             if request.method != "GET":
                 self.assertEqual(request.get_header("X-client-secret"), "client-secret")
 
+    @patch("urllib.request.urlopen")
+    def test_checkouts_and_payment_profile_map_six_methods(self, urlopen):
+        urlopen.side_effect = [
+            FakeResponse({"success": True, "data": {"access_token": "token"}}),
+            *[FakeResponse({"success": True, "data": {"ok": True}}) for _ in range(6)],
+        ]
+        client = MonaPay(
+            client_id="client-id",
+            client_secret="client-secret",
+            base_url="https://example.test",
+        )
+        client.payment_profile.get()
+        client.paymentProfile.set({"display_name": "Shop MONA", "locale": "vi"})
+        client.checkouts.create(
+            {
+                "amount": 250000,
+                "order_code": "DH_10234",
+                "return_url": "https://shop.test/return",
+            },
+            idempotency_key="create-key",
+        )
+        client.checkouts.get("checkout/id")
+        client.checkouts.list(
+            status="pending",
+            order_code="DH_10234",
+            from_date="2026-09-01",
+            page=2,
+            limit=50,
+        )
+        client.checkouts.cancel("checkout/id", idempotency_key="cancel-key")
+
+        requests = [call.args[0] for call in urlopen.call_args_list[1:]]
+        self.assertEqual(len(requests), 6)
+        self.assertEqual(requests[0].full_url, "https://example.test/api/v1/payment-profile")
+        self.assertEqual(requests[0].method, "GET")
+        self.assertEqual(requests[1].method, "PUT")
+        self.assertEqual(
+            json.loads(requests[1].data), {"display_name": "Shop MONA", "locale": "vi"}
+        )
+        self.assertEqual(requests[2].full_url, "https://example.test/api/v1/checkouts")
+        self.assertEqual(requests[2].get_header("Idempotency-key"), "create-key")
+        self.assertEqual(
+            requests[3].full_url,
+            "https://example.test/api/v1/checkouts/checkout%2Fid",
+        )
+        self.assertIn("status=pending", requests[4].full_url)
+        self.assertIn("order_code=DH_10234", requests[4].full_url)
+        self.assertIn("limit=50", requests[4].full_url)
+        self.assertEqual(
+            requests[5].full_url,
+            "https://example.test/api/v1/checkouts/checkout%2Fid/cancel",
+        )
+        self.assertEqual(requests[5].get_header("Idempotency-key"), "cancel-key")
+        self.assertEqual(json.loads(requests[5].data), {})
+        for request in requests:
+            if request.method != "GET":
+                self.assertEqual(request.get_header("X-client-secret"), "client-secret")
+
 
 if __name__ == "__main__":
     unittest.main()

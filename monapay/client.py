@@ -7,6 +7,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Any, Dict, Iterator, Mapping, Optional
 
 
@@ -109,6 +110,55 @@ class VirtualAccounts(_Resource):
 class BankAccounts(_Resource):
     def list(self) -> Any:
         return self._client._request("GET", "/api/v1/client/bank-accounts")
+
+
+class PaymentProfile(_Resource):
+    def get(self) -> Any:
+        return self._client._request("GET", "/api/v1/payment-profile")
+
+    def set(self, body: Mapping[str, Any]) -> Any:
+        return self._client._request("PUT", "/api/v1/payment-profile", body=body)
+
+
+class Checkouts(_Resource):
+    def create(
+        self, body: Mapping[str, Any], idempotency_key: Optional[str] = None
+    ) -> Any:
+        return self._client._request(
+            "POST",
+            "/api/v1/checkouts",
+            body=body,
+            headers={"Idempotency-Key": idempotency_key or str(uuid.uuid4())},
+        )
+
+    def get(self, checkout_id: str) -> Any:
+        return self._client._request(
+            "GET", "/api/v1/checkouts/" + _segment(checkout_id)
+        )
+
+    def list(self, **options: Any) -> Any:
+        return self._client._request(
+            "GET",
+            "/api/v1/checkouts",
+            query={
+                "status": options.get("status"),
+                "order_code": options.get("order_code"),
+                "from_date": options.get("from_date"),
+                "to_date": options.get("to_date"),
+                "page": options.get("page"),
+                "limit": options.get("limit"),
+            },
+        )
+
+    def cancel(
+        self, checkout_id: str, idempotency_key: Optional[str] = None
+    ) -> Any:
+        return self._client._request(
+            "POST",
+            "/api/v1/checkouts/{}/cancel".format(_segment(checkout_id)),
+            body={},
+            headers={"Idempotency-Key": idempotency_key or str(uuid.uuid4())},
+        )
 
 
 class QrPayments(_Resource):
@@ -308,6 +358,9 @@ class MonaPay:
         self.keys = Keys(self)
         self.va = VirtualAccounts(self)
         self.bank_accounts = BankAccounts(self)
+        self.payment_profile = PaymentProfile(self)
+        self.paymentProfile = self.payment_profile
+        self.checkouts = Checkouts(self)
         self.qr = QrPayments(self)
         self.transactions = Transactions(self)
         self.webhooks = Webhooks(self)
@@ -397,19 +450,29 @@ class MonaPay:
         path: str,
         body: Optional[Mapping[str, Any]] = None,
         query: Optional[Mapping[str, Any]] = None,
+        headers: Optional[Mapping[str, str]] = None,
         retry: bool = True,
     ) -> Any:
         if not self._access_token or time.time() >= self._token_expires_at:
             self._access_token = None
             self._login()
         try:
-            return self._send(method, path, body=body, query=query, authenticated=True)
+            return self._send(
+                method, path, body=body, query=query, headers=headers, authenticated=True
+            )
         except ApiError as error:
             if error.status == 401 and retry:
                 self._access_token = None
                 self._token_expires_at = 0.0
                 self._login()
-                return self._request(method, path, body=body, query=query, retry=False)
+                return self._request(
+                    method,
+                    path,
+                    body=body,
+                    query=query,
+                    headers=headers,
+                    retry=False,
+                )
             raise
 
     def _send(
@@ -418,6 +481,7 @@ class MonaPay:
         path: str,
         body: Optional[Mapping[str, Any]] = None,
         query: Optional[Mapping[str, Any]] = None,
+        headers: Optional[Mapping[str, str]] = None,
         authenticated: bool = True,
     ) -> Any:
         clean_query = {key: value for key, value in (query or {}).items() if value is not None}
@@ -425,18 +489,19 @@ class MonaPay:
         if clean_query:
             url += "?" + urllib.parse.urlencode(clean_query)
 
-        headers = {"Accept": "application/json"}
+        request_headers = {"Accept": "application/json"}
+        request_headers.update(headers or {})
         if authenticated:
-            headers["Authorization"] = "Bearer " + str(self._access_token)
+            request_headers["Authorization"] = "Bearer " + str(self._access_token)
         if authenticated and method != "GET" and self.client_secret:
-            headers["X-Client-Secret"] = self.client_secret
+            request_headers["X-Client-Secret"] = self.client_secret
         encoded_body = None
         if body is not None:
-            headers["Content-Type"] = "application/json"
+            request_headers["Content-Type"] = "application/json"
             encoded_body = json.dumps(body, separators=(",", ":")).encode("utf-8")
 
         request = urllib.request.Request(
-            url, data=encoded_body, headers=headers, method=method
+            url, data=encoded_body, headers=request_headers, method=method
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:

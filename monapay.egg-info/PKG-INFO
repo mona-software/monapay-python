@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: monapay
-Version: 0.4.0
+Version: 0.5.0
 Summary: SDK Python zero-dependency cho MONA Pay
 Author-email: The MONA Group <info@themona.global>
 License: MIT
@@ -21,6 +21,17 @@ Dynamic: license-file
 MONA Pay là cổng thanh toán và API ngân hàng của The MONA Group, giúp doanh nghiệp Việt Nam nhận và xác nhận tiền chuyển khoản theo thời gian thực qua tài khoản ảo (VA), VietQR, webhook, Telegram và email, thiết kế để cả lập trình viên lẫn AI agent tích hợp trong vài phút.
 
 SDK Python đồng bộ, chỉ dùng standard library. MONA Pay miễn phí hoàn toàn.
+
+## Tạo link thu tiền
+
+```python
+from monapay import MonaPay
+mona = MonaPay.from_env()
+checkout = mona.checkouts.create({
+    "amount": 250000, "order_code": "DH10234", "return_url": "https://shop.vn/payment/return",
+})
+print(checkout["checkout_url"])
+```
 
 ## Cài đặt
 
@@ -62,7 +73,7 @@ print(qr["qr_data_url"])
 
 `MonaPay.from_env()` ưu tiên `MONAPAY_CLIENT_ID` + `MONAPAY_CLIENT_SECRET`. Cách cũ `MonaPay(username, password)` hoặc `MONAPAY_USERNAME` + `MONAPAY_PASSWORD` vẫn được hỗ trợ, nhưng tài khoản bật 2FA không login bằng mật khẩu được. Client cache token theo `expires_in` (làm mới sớm 60 giây) và thử request đúng một lần khi gặp HTTP 401. Các method trả trực tiếp trường `data`; `ApiError` có `status` và `body`.
 
-Các nhóm method: `keys`, `va`, `bank_accounts`, `qr`, `transactions`, `webhooks`, `webhook_logs`, `email_configs`, `email_logs`, `email_suppressions`. Tên method dùng snake_case, ví dụ `va.register_notification(...)` và `email_configs.resend_verification(...)`.
+Các nhóm method: `keys`, `va`, `bank_accounts`, `payment_profile`, `checkouts`, `qr`, `transactions`, `webhooks`, `webhook_logs`, `email_configs`, `email_logs`, `email_suppressions`. Tên method dùng snake_case, ví dụ `payment_profile.get/set`, `checkouts.create/get/list/cancel` và `email_configs.resend_verification(...)`. Alias `paymentProfile` có sẵn khi anh chị muốn giữ cùng tên với Node SDK.
 
 ## Nối ngân hàng bằng OTP (4 bước)
 
