@@ -31,6 +31,52 @@ class FakeResponse:
 
 class ClientTests(unittest.TestCase):
     @patch("urllib.request.urlopen")
+    def test_client_credentials_use_oauth_and_cache_token(self, urlopen):
+        urlopen.side_effect = [
+            FakeResponse(
+                {
+                    "success": True,
+                    "data": {"access_token": "oauth-token", "expires_in": 3600},
+                }
+            ),
+            FakeResponse({"success": True, "data": {"id": "hook-1"}}),
+            FakeResponse({"success": True, "data": {"username": "shop"}}),
+        ]
+        client = MonaPay(
+            client_id="client-id",
+            client_secret="client-secret",
+            base_url="https://example.test",
+        )
+        client.webhooks.create({"name": "Shop", "webhook_url": "https://shop.test/hook"})
+        client.me()
+
+        oauth_request = urlopen.call_args_list[0].args[0]
+        write_request = urlopen.call_args_list[1].args[0]
+        self.assertEqual(oauth_request.full_url, "https://example.test/api/v1/oauth/token")
+        self.assertEqual(
+            json.loads(oauth_request.data),
+            {
+                "grant_type": "client_credentials",
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+            },
+        )
+        self.assertEqual(write_request.get_header("X-client-secret"), "client-secret")
+        self.assertEqual(urlopen.call_count, 3)
+
+    def test_from_env_prefers_client_credentials(self):
+        client = MonaPay.from_env(
+            {
+                "MONAPAY_CLIENT_ID": "client-id",
+                "MONAPAY_CLIENT_SECRET": "client-secret",
+                "MONAPAY_USERNAME": "legacy-user",
+                "MONAPAY_PASSWORD": "legacy-pass",
+            }
+        )
+        self.assertEqual(client.client_id, "client-id")
+        self.assertIsNone(client.username)
+
+    @patch("urllib.request.urlopen")
     def test_builds_url_headers_and_caches_token(self, urlopen):
         urlopen.side_effect = [
             FakeResponse({"success": True, "data": {"access_token": "token-1"}}),
@@ -95,6 +141,59 @@ class ClientTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in items], ["tx-1", "tx-2"])
         self.assertIn("virtual_account_number=MONA+01", urlopen.call_args_list[1].args[0].full_url)
         self.assertIn("page=2", urlopen.call_args_list[2].args[0].full_url)
+
+    @patch("urllib.request.urlopen")
+    def test_va_has_all_five_bank_linking_methods(self, urlopen):
+        urlopen.side_effect = [
+            FakeResponse({"success": True, "data": {"access_token": "token"}}),
+            FakeResponse({"success": True, "data": {"ok": True}}),
+            FakeResponse({"success": True, "data": {"ok": True}}),
+            FakeResponse({"success": True, "data": {"ok": True}}),
+            FakeResponse({"success": True, "data": {"ok": True}}),
+            FakeResponse({"success": True, "data": {"ok": True}}),
+        ]
+        client = MonaPay(
+            client_id="client-id",
+            client_secret="client-secret",
+            base_url="https://example.test",
+        )
+        client.register_virtual_account(
+            {
+                "account_number": 123456789,
+                "virtual_account_info": {"virtual_account_prefix_code": "LOC"},
+            }
+        )
+        client.verify_virtual_account("request/id", "123456")
+        client.register_notification("va/id")
+        client.verify_notification("notification/id", "654321")
+        client.notification_detail("va/id")
+
+        api_requests = [call.args[0] for call in urlopen.call_args_list[1:]]
+        self.assertEqual(
+            api_requests[0].full_url,
+            "https://example.test/api/v1/acb/virtual-account/registration",
+        )
+        self.assertEqual(
+            api_requests[1].full_url,
+            "https://example.test/api/v1/acb/request%2Fid/virtual-account/verification",
+        )
+        self.assertEqual(json.loads(api_requests[1].data), {"code": "123456"})
+        self.assertEqual(
+            api_requests[2].full_url,
+            "https://example.test/api/v1/acb/va%2Fid/notification/registration",
+        )
+        self.assertEqual(
+            json.loads(api_requests[2].data), {"receive_noti_realtime": True}
+        )
+        self.assertEqual(
+            api_requests[3].full_url,
+            "https://example.test/api/v1/acb/notification%2Fid/notification/verification",
+        )
+        self.assertEqual(
+            api_requests[4].full_url,
+            "https://example.test/api/v1/acb/va%2Fid/notification/details",
+        )
+        self.assertEqual(api_requests[4].method, "GET")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
 """Synchronous, standard-library-only MONA Pay client."""
 
 import json
+import os
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -64,11 +66,13 @@ class VirtualAccounts(_Resource):
             body={"code": code},
         )
 
-    def register_notification(self, va_id: str, body: Mapping[str, Any]) -> Any:
+    def register_notification(
+        self, va_id: str, body: Optional[Mapping[str, Any]] = None
+    ) -> Any:
         return self._client._request(
             "POST",
             "/api/v1/acb/{}/notification/registration".format(_segment(va_id)),
-            body=body,
+            body=body or {"receive_noti_realtime": True},
         )
 
     def verify_notification(self, request_id: str, code: str) -> Any:
@@ -76,6 +80,12 @@ class VirtualAccounts(_Resource):
             "POST",
             "/api/v1/acb/{}/notification/verification".format(_segment(request_id)),
             body={"code": code},
+        )
+
+    def notification_detail(self, va_id: str) -> Any:
+        return self._client._request(
+            "GET",
+            "/api/v1/acb/{}/notification/details".format(_segment(va_id)),
         )
 
     def list(self, bank_account_id: str) -> Any:
@@ -182,24 +192,32 @@ class WebhookLogs(_Resource):
 
 
 class MonaPay:
-    """Synchronous MONA Pay API client using urllib."""
+    """Synchronous MONA Pay API client using OAuth client credentials or legacy password login."""
 
     def __init__(
         self,
-        username: str,
-        password: str,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         client_secret: Optional[str] = None,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 30,
+        client_id: Optional[str] = None,
     ):
-        if not username or not password:
-            raise ValueError("username và password là bắt buộc")
+        has_client_credentials = bool(client_id and client_secret)
+        has_password_credentials = bool(username and password)
+        if not has_client_credentials and not has_password_credentials:
+            raise ValueError(
+                "Cần client_id + client_secret hoặc username + password; nên dùng "
+                "client_id/client_secret, tài khoản bật 2FA không login bằng mật khẩu được"
+            )
+        self.client_id = client_id
         self.username = username
         self.password = password
         self.client_secret = client_secret
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._access_token = None  # type: Optional[str]
+        self._token_expires_at = 0.0
         self._login_lock = threading.Lock()
 
         self.keys = Keys(self)
@@ -210,8 +228,49 @@ class MonaPay:
         self.webhooks = Webhooks(self)
         self.webhook_logs = WebhookLogs(self)
 
+    @classmethod
+    def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "MonaPay":
+        """Create a client, preferring MONAPAY_CLIENT_ID/MONAPAY_CLIENT_SECRET."""
+        values = os.environ if env is None else env
+        common = {"base_url": values.get("MONAPAY_BASE_URL", DEFAULT_BASE_URL)}
+        if values.get("MONAPAY_CLIENT_ID") and values.get("MONAPAY_CLIENT_SECRET"):
+            return cls(
+                client_id=values["MONAPAY_CLIENT_ID"],
+                client_secret=values["MONAPAY_CLIENT_SECRET"],
+                **common,
+            )
+        if values.get("MONAPAY_USERNAME") and values.get("MONAPAY_PASSWORD"):
+            return cls(
+                username=values["MONAPAY_USERNAME"],
+                password=values["MONAPAY_PASSWORD"],
+                client_secret=values.get("MONAPAY_CLIENT_SECRET"),
+                **common,
+            )
+        raise ValueError(
+            "Thiếu MONAPAY_CLIENT_ID / MONAPAY_CLIENT_SECRET hoặc MONAPAY_USERNAME / "
+            "MONAPAY_PASSWORD; nên dùng client_id/client_secret, tài khoản bật 2FA "
+            "không login bằng mật khẩu được"
+        )
+
     def me(self) -> Any:
         return self._request("GET", "/api/v1/client/me")
+
+    def register_virtual_account(self, body: Mapping[str, Any]) -> Any:
+        return self.va.register(body)
+
+    def verify_virtual_account(self, request_id: str, code: str) -> Any:
+        return self.va.verify(request_id, code)
+
+    def register_notification(
+        self, va_id: str, body: Optional[Mapping[str, Any]] = None
+    ) -> Any:
+        return self.va.register_notification(va_id, body)
+
+    def verify_notification(self, request_id: str, code: str) -> Any:
+        return self.va.verify_notification(request_id, code)
+
+    def notification_detail(self, va_id: str) -> Any:
+        return self.va.notification_detail(va_id)
 
     def iter_transactions(
         self, virtual_account_number: str, page: int = 1, limit: int = 100
@@ -220,17 +279,28 @@ class MonaPay:
 
     def _login(self) -> str:
         with self._login_lock:
-            if self._access_token:
+            if self._access_token and time.time() < self._token_expires_at:
                 return self._access_token
+            using_client_credentials = bool(self.client_id and self.client_secret)
             data = self._send(
                 "POST",
-                "/api/v1/client/login",
-                body={"username": self.username, "password": self.password},
+                "/api/v1/oauth/token" if using_client_credentials else "/api/v1/client/login",
+                body=(
+                    {
+                        "grant_type": "client_credentials",
+                        "client_id": self.client_id,
+                        "client_secret": self.client_secret,
+                    }
+                    if using_client_credentials
+                    else {"username": self.username, "password": self.password}
+                ),
                 authenticated=False,
             )
             if not isinstance(data, dict) or not data.get("access_token"):
-                raise ApiError("Response đăng nhập không có access_token")
+                raise ApiError("Response xác thực không có access_token")
             self._access_token = data["access_token"]
+            expires_in = float(data.get("expires_in") or (3600 if using_client_credentials else 86400))
+            self._token_expires_at = time.time() + max(0.0, expires_in - 60)
             return self._access_token
 
     def _request(
@@ -241,13 +311,15 @@ class MonaPay:
         query: Optional[Mapping[str, Any]] = None,
         retry: bool = True,
     ) -> Any:
-        if not self._access_token:
+        if not self._access_token or time.time() >= self._token_expires_at:
+            self._access_token = None
             self._login()
         try:
             return self._send(method, path, body=body, query=query, authenticated=True)
         except ApiError as error:
             if error.status == 401 and retry:
                 self._access_token = None
+                self._token_expires_at = 0.0
                 self._login()
                 return self._request(method, path, body=body, query=query, retry=False)
             raise

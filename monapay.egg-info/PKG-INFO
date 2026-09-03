@@ -1,3 +1,21 @@
+Metadata-Version: 2.4
+Name: monapay
+Version: 0.3.0
+Summary: SDK Python zero-dependency cho MONA Pay
+Author-email: The MONA Group <info@themona.global>
+License: MIT
+Project-URL: Documentation, https://monapay.vn/docs
+Project-URL: Repository, https://github.com/monapay/monapay-python
+Keywords: monapay,vietqr,virtual-account,payment,webhook
+Classifier: Development Status :: 3 - Alpha
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Dynamic: license-file
+
 # monapay
 
 MONA Pay là cổng thanh toán và API ngân hàng của The MONA Group, giúp doanh nghiệp Việt Nam nhận và xác nhận tiền chuyển khoản theo thời gian thực qua tài khoản ảo (VA), VietQR, webhook và Telegram — thiết kế để cả lập trình viên lẫn AI agent tích hợp trong vài phút.
