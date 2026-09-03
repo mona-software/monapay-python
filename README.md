@@ -1,6 +1,6 @@
 # monapay
 
-MONA Pay là cổng thanh toán và API ngân hàng của The MONA Group, giúp doanh nghiệp Việt Nam nhận và xác nhận tiền chuyển khoản theo thời gian thực qua tài khoản ảo (VA), VietQR, webhook và Telegram — thiết kế để cả lập trình viên lẫn AI agent tích hợp trong vài phút.
+MONA Pay là cổng thanh toán và API ngân hàng của The MONA Group, giúp doanh nghiệp Việt Nam nhận và xác nhận tiền chuyển khoản theo thời gian thực qua tài khoản ảo (VA), VietQR, webhook, Telegram và email, thiết kế để cả lập trình viên lẫn AI agent tích hợp trong vài phút.
 
 SDK Python đồng bộ, chỉ dùng standard library. MONA Pay miễn phí hoàn toàn.
 
@@ -44,7 +44,7 @@ print(qr["qr_data_url"])
 
 `MonaPay.from_env()` ưu tiên `MONAPAY_CLIENT_ID` + `MONAPAY_CLIENT_SECRET`. Cách cũ `MonaPay(username, password)` hoặc `MONAPAY_USERNAME` + `MONAPAY_PASSWORD` vẫn được hỗ trợ, nhưng tài khoản bật 2FA không login bằng mật khẩu được. Client cache token theo `expires_in` (làm mới sớm 60 giây) và thử request đúng một lần khi gặp HTTP 401. Các method trả trực tiếp trường `data`; `ApiError` có `status` và `body`.
 
-Các nhóm method: `keys`, `va`, `bank_accounts`, `qr`, `transactions`, `webhooks`, `webhook_logs`. Tên method dùng snake_case, ví dụ `va.register_notification(...)` và `transactions.retry(id, target_type="WEBHOOK", target_id=...)`.
+Các nhóm method: `keys`, `va`, `bank_accounts`, `qr`, `transactions`, `webhooks`, `webhook_logs`, `email_configs`, `email_logs`, `email_suppressions`. Tên method dùng snake_case, ví dụ `va.register_notification(...)` và `email_configs.resend_verification(...)`.
 
 ## Nối ngân hàng bằng OTP (4 bước)
 
@@ -69,6 +69,21 @@ mona.verify_notification(notification["acb_request"]["id"], otp_lan_hai)
 
 print(mona.notification_detail(va["id"]))
 ```
+
+## Thông báo qua email
+
+MONA Pay gửi mã 6 số tới từng địa chỉ mới. Ứng dụng phải hỏi người dùng mã trong hộp thư rồi xác minh, không tự đoán mã.
+
+```python
+config = mona.email_configs.create({"name": "Kế toán", "recipients": ["kt@shop.vn"]})
+email = config["pending_verification"][0]
+code = ask_user_for_code(email)
+mona.email_configs.verify(config["id"], email, code)
+mona.email_configs.test(config["id"])
+print(mona.email_logs.list(config_id=config["id"], status="sent"))
+```
+
+Địa chỉ bounce hoặc khiếu nại nằm trong `email_suppressions.list()`; chỉ gọi `email_suppressions.remove(email)` sau khi đã sửa nguyên nhân.
 
 Đọc hết các trang giao dịch:
 

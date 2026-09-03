@@ -195,6 +195,85 @@ class ClientTests(unittest.TestCase):
         )
         self.assertEqual(api_requests[4].method, "GET")
 
+    @patch("urllib.request.urlopen")
+    def test_email_resources_map_configs_logs_stats_and_suppressions(self, urlopen):
+        urlopen.side_effect = [
+            FakeResponse({"success": True, "data": {"access_token": "token"}}),
+            *[FakeResponse({"success": True, "data": {"ok": True}}) for _ in range(12)],
+        ]
+        client = MonaPay(
+            client_id="client-id",
+            client_secret="client-secret",
+            base_url="https://example.test",
+        )
+        client.email_configs.list()
+        client.email_configs.get("config/id")
+        client.email_configs.create(
+            {
+                "name": "Kế toán",
+                "recipients": ["kt@example.com"],
+                "events": ["TRANSACTION_IN"],
+            }
+        )
+        client.email_configs.update(
+            "config/id", {"is_active": True, "virtual_account_id": None}
+        )
+        client.email_configs.remove("config/id")
+        client.email_configs.verify("config/id", "kt@example.com", "123456")
+        client.email_configs.resend_verification("config/id", "kt@example.com")
+        client.email_configs.test("config/id")
+        client.email_logs.list(
+            config_id="config/id",
+            status="sent",
+            event_type="TEST",
+            from_date="2026-09-01",
+            page=2,
+            limit=100,
+        )
+        client.email_logs.stats(from_date="2026-09-01", to_date="2026-09-03")
+        client.email_suppressions.list()
+        client.email_suppressions.remove("bounce+tag@example.com")
+
+        requests = [call.args[0] for call in urlopen.call_args_list[1:]]
+        self.assertEqual(len(requests), 12)
+        self.assertEqual(requests[0].full_url, "https://example.test/api/v1/email-configs")
+        self.assertEqual(
+            requests[1].full_url,
+            "https://example.test/api/v1/email-configs/config%2Fid",
+        )
+        self.assertEqual(
+            json.loads(requests[2].data),
+            {
+                "name": "Kế toán",
+                "recipients": ["kt@example.com"],
+                "events": ["TRANSACTION_IN"],
+            },
+        )
+        self.assertEqual(
+            json.loads(requests[3].data),
+            {"is_active": True, "virtual_account_id": None},
+        )
+        self.assertEqual(requests[4].method, "DELETE")
+        self.assertEqual(
+            json.loads(requests[5].data),
+            {"email": "kt@example.com", "code": "123456"},
+        )
+        self.assertTrue(requests[6].full_url.endswith("/config%2Fid/resend-verification"))
+        self.assertEqual(json.loads(requests[7].data), {})
+        self.assertIn("config_id=config%2Fid", requests[8].full_url)
+        self.assertIn("event_type=TEST", requests[8].full_url)
+        self.assertIn("to_date=2026-09-03", requests[9].full_url)
+        self.assertEqual(
+            requests[10].full_url, "https://example.test/api/v1/email-suppressions"
+        )
+        self.assertEqual(
+            requests[11].full_url,
+            "https://example.test/api/v1/email-suppressions/bounce%2Btag%40example.com",
+        )
+        for request in requests:
+            if request.method != "GET":
+                self.assertEqual(request.get_header("X-client-secret"), "client-secret")
+
 
 if __name__ == "__main__":
     unittest.main()

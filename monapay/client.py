@@ -36,6 +36,18 @@ def _log_query(options: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _email_log_query(options: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "config_id": options.get("config_id"),
+        "status": options.get("status"),
+        "event_type": options.get("event_type"),
+        "from_date": options.get("from_date"),
+        "to_date": options.get("to_date"),
+        "page": options.get("page"),
+        "limit": options.get("limit"),
+    }
+
+
 class _Resource:
     def __init__(self, client: "MonaPay"):
         self._client = client
@@ -191,6 +203,79 @@ class WebhookLogs(_Resource):
         )
 
 
+class EmailConfigs(_Resource):
+    def list(self) -> Any:
+        return self._client._request("GET", "/api/v1/email-configs")
+
+    def get(self, config_id: str) -> Any:
+        return self._client._request(
+            "GET", "/api/v1/email-configs/" + _segment(config_id)
+        )
+
+    def create(self, body: Mapping[str, Any]) -> Any:
+        return self._client._request("POST", "/api/v1/email-configs", body=body)
+
+    def update(self, config_id: str, body: Mapping[str, Any]) -> Any:
+        return self._client._request(
+            "PUT", "/api/v1/email-configs/" + _segment(config_id), body=body
+        )
+
+    def remove(self, config_id: str) -> Any:
+        return self._client._request(
+            "DELETE", "/api/v1/email-configs/" + _segment(config_id)
+        )
+
+    def verify(self, config_id: str, email: str, code: str) -> Any:
+        return self._client._request(
+            "POST",
+            "/api/v1/email-configs/{}/verify".format(_segment(config_id)),
+            body={"email": email, "code": code},
+        )
+
+    def resend_verification(self, config_id: str, email: str) -> Any:
+        return self._client._request(
+            "POST",
+            "/api/v1/email-configs/{}/resend-verification".format(
+                _segment(config_id)
+            ),
+            body={"email": email},
+        )
+
+    def test(self, config_id: str) -> Any:
+        return self._client._request(
+            "POST",
+            "/api/v1/email-configs/{}/test".format(_segment(config_id)),
+            body={},
+        )
+
+
+class EmailLogs(_Resource):
+    def list(self, **options: Any) -> Any:
+        return self._client._request(
+            "GET", "/api/v1/email-logs", query=_email_log_query(options)
+        )
+
+    def stats(self, **options: Any) -> Any:
+        return self._client._request(
+            "GET",
+            "/api/v1/email-logs/stats",
+            query={
+                "from_date": options.get("from_date"),
+                "to_date": options.get("to_date"),
+            },
+        )
+
+
+class EmailSuppressions(_Resource):
+    def list(self) -> Any:
+        return self._client._request("GET", "/api/v1/email-suppressions")
+
+    def remove(self, email: str) -> Any:
+        return self._client._request(
+            "DELETE", "/api/v1/email-suppressions/" + _segment(email)
+        )
+
+
 class MonaPay:
     """Synchronous MONA Pay API client using OAuth client credentials or legacy password login."""
 
@@ -227,6 +312,9 @@ class MonaPay:
         self.transactions = Transactions(self)
         self.webhooks = Webhooks(self)
         self.webhook_logs = WebhookLogs(self)
+        self.email_configs = EmailConfigs(self)
+        self.email_logs = EmailLogs(self)
+        self.email_suppressions = EmailSuppressions(self)
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "MonaPay":
