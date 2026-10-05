@@ -1,54 +1,100 @@
 # monapay
 
-MONA Pay là API ngân hàng và dịch vụ xác nhận thanh toán tự động của The MONA Group, giúp doanh nghiệp Việt Nam nhận và xác nhận tiền chuyển khoản theo thời gian thực qua tài khoản ảo (VA), VietQR, webhook, Telegram và email, thiết kế để cả lập trình viên lẫn AI agent tích hợp trong vài phút.
+Python SDK for the MONA Pay API: create checkout links and VietQR codes, manage virtual accounts, webhooks and email notifications, and verify signed webhooks.
 
-SDK Python đồng bộ, chỉ dùng standard library. MONA Pay miễn phí hoàn toàn.
+The client is synchronous and uses only the standard library. Python 3.8 or later.
 
-## Tạo link thu tiền
-
-```python
-from monapay import MonaPay
-mona = MonaPay.from_env()
-checkout = mona.checkouts.create({
-    "amount": 250000, "order_code": "DH10234", "return_url": "https://shop.vn/payment/return",
-})
-print(checkout["checkout_url"])
-```
-
-## Cài đặt
+## Install
 
 ```bash
 pip install monapay
 ```
 
-## Sử dụng
+## Quick start
 
-Các sub-client tương ứng toàn bộ API: `me`, `keys`, `bankAccounts`, `virtualAccounts`, `qr`, `transactions`, `webhooks`, `webhookLogs`, `emailConfigs`, `emailLogs`, `checkouts`, `paymentProfile`, `sandbox`. Trong Python, các nhóm dùng snake_case như `bank_accounts`, `webhook_logs`, `email_configs`, `email_logs`, `payment_profile`; factory tương đương `MonaPay.fromEnv()` của Node là `MonaPay.from_env()`.
+```python
+from monapay import MonaPay
 
-Khởi tạo từ biến môi trường hoặc truyền credentials tường minh:
+mona = MonaPay.from_env()
+checkout = mona.checkouts.create({
+    "amount": 250000,
+    "order_code": "DH10234",
+    "return_url": "https://shop.example/payment/return",
+})
+print(checkout["checkout_url"])
+```
+
+## Usage
+
+### Client
 
 ```python
 import os
 from monapay import MonaPay
 
+# From environment variables (see Configuration)
 mona = MonaPay.from_env()
 
-mona_explicit = MonaPay(
+# Or with explicit credentials
+client = MonaPay(
     client_id=os.environ["MONAPAY_CLIENT_ID"],
     client_secret=os.environ["MONAPAY_CLIENT_SECRET"],
 )
 
-# Tự lấy OAuth token và cache tới gần hạn.
 print(mona.me())
+```
 
-mona.webhooks.create({
-    "name": "Web ban hang",
-    "webhook_url": "https://shop.vn/webhooks/monapay",
-    "auth_type": "HMAC_SHA256",
-    "secret_key": os.environ["MONA_WEBHOOK_SECRET"],
-    "payload_format": "application/json",
-})
+- The first call fetches an OAuth token. The token is cached until 60 seconds before `expires_in` and reused.
+- A request that fails with HTTP 401 is retried once with a fresh token.
+- Methods return the `data` field of the API response.
+- Errors are raised as `ApiError` with `status` and `body`.
+- `MonaPay(...)` also accepts `base_url` and `timeout` (seconds, default 30).
+- `checkouts.create` and `checkouts.cancel` send an `Idempotency-Key` header. Pass `idempotency_key=` to set it yourself; otherwise a random UUID is used.
 
+### Resources
+
+| Attribute | Methods |
+| --- | --- |
+| `keys` | `generate`, `list`, `destroy` |
+| `bank_accounts` | `list` |
+| `va` | `register`, `verify`, `register_notification`, `verify_notification`, `notification_detail`, `list` |
+| `payment_profile` (alias `paymentProfile`) | `get`, `set` |
+| `checkouts` | `create`, `get`, `list`, `cancel` |
+| `qr` | `generate`, `cancel` |
+| `transactions` | `list`, `iterate`, `retry` |
+| `sandbox` | `transaction` |
+| `webhooks` | `list`, `create`, `update`, `remove`, `test` |
+| `webhook_logs` | `list`, `stats` |
+| `email_configs` | `list`, `get`, `create`, `update`, `remove`, `verify`, `resend_verification`, `test` |
+| `email_logs` | `list`, `stats` |
+| `email_suppressions` | `list`, `remove` |
+
+The client also exposes `me()`, `iter_transactions()` and the shortcuts `register_virtual_account`, `verify_virtual_account`, `register_notification`, `verify_notification` and `notification_detail`.
+
+### Test with the sandbox
+
+No bank connection is needed.
+
+```python
+checkout = mona.checkouts.create({
+    "amount": 10000,
+    "order_code": "DH10234",
+    "return_url": "https://shop.example/payment/return",
+}, sandbox=True)
+mona.sandbox.transaction(
+    virtual_account_number=checkout["bank"]["account_number"],
+    amount=checkout["amount"],
+    description=checkout["order_code"],
+)
+paid = mona.checkouts.get(checkout["id"])
+print(paid["status"])  # "paid"
+```
+
+The `CHECKOUT_PAID` webhook carries the checkout in `checkout_id`, not `id`.
+
+### Dynamic VietQR
+
+```python
 qr = mona.qr.generate({
     "ownerNumber": "123456789", "ownerType": "ORG",
     "merchantId": "MC00012345", "terminalId": "TM0001", "orderId": "DH10234",
@@ -58,41 +104,9 @@ qr = mona.qr.generate({
 print(qr["qr_data_url"])
 ```
 
-`MonaPay.from_env()` ưu tiên `MONAPAY_CLIENT_ID` + `MONAPAY_CLIENT_SECRET`. Cách cũ `MonaPay(username, password)` hoặc `MONAPAY_USERNAME` + `MONAPAY_PASSWORD` vẫn được hỗ trợ, nhưng tài khoản bật 2FA không login bằng mật khẩu được. Client cache token theo `expires_in` (làm mới sớm 60 giây) và thử request đúng một lần khi gặp HTTP 401. Các method trả trực tiếp trường `data`; `ApiError` có `status` và `body`.
+### Connect a bank account with OTP
 
-Các nhóm dùng snake_case; alias `paymentProfile` có sẵn khi anh chị muốn giữ cùng tên với Node SDK.
-
-| Sub-client | Method |
-| --- | --- |
-| `keys`, `bank_accounts` | `generate/list/destroy`, `list` |
-| `va` | `register/verify/register_notification/verify_notification/notification_detail/list` |
-| `payment_profile`, `checkouts` | `get/set`, `create/get/list/cancel` |
-| `qr` | `generate/cancel` |
-| `transactions` | `list/iterate/retry` |
-| `sandbox` | `transaction` |
-| `webhooks`, `webhook_logs` | `list/create/update/remove/test`, `list/stats` |
-| `email_configs`, `email_logs`, `email_suppressions` | `list/get/create/update/remove/verify/resend_verification/test`, `list/stats`, `list/remove` |
-
-## Thử bằng sandbox (không cần nối ngân hàng)
-
-```python
-checkout = mona.checkouts.create({
-    "amount": 10000, "order_code": "DH10234",
-    "return_url": "https://shop.vn/payment/return",
-}, sandbox=True)
-mona.sandbox.transaction(
-    virtual_account_number=checkout["bank"]["account_number"],
-    amount=checkout["amount"], description=checkout["order_code"],
-)
-paid = mona.checkouts.get(checkout["id"])
-print(paid["status"])  # "paid"
-```
-
-Webhook `CHECKOUT_PAID` có trường `checkout_id`, không phải `id` (tương ứng `event.checkout_id` trên object); với dict Python, dùng `event["checkout_id"]`.
-
-## Nối ngân hàng bằng OTP (4 bước)
-
-OTP do ACB gửi về số điện thoại đăng ký của chủ tài khoản. Ứng dụng phải hỏi người dùng ở bước 2 và 4, không tự tạo hoặc lưu OTP.
+The bank sends each OTP to the account owner's registered phone number. Your app must ask the user for the code at the verify steps; do not generate or store OTPs.
 
 ```python
 registration = mona.register_virtual_account({
@@ -107,38 +121,37 @@ registration = mona.register_virtual_account({
     "user_agreement": True,
 })
 
-va = mona.verify_virtual_account(registration["acb_request"]["id"], otp_nguoi_dung_nhap)
+va = mona.verify_virtual_account(registration["acb_request"]["id"], first_otp_from_user)
 notification = mona.register_notification(va["id"])
-mona.verify_notification(notification["acb_request"]["id"], otp_lan_hai)
+mona.verify_notification(notification["acb_request"]["id"], second_otp_from_user)
 
 print(mona.notification_detail(va["id"]))
 ```
 
-## Thông báo qua email
-
-MONA Pay gửi mã 6 số tới từng địa chỉ mới. Ứng dụng phải hỏi người dùng mã trong hộp thư rồi xác minh, không tự đoán mã.
-
-```python
-config = mona.email_configs.create({"name": "Kế toán", "recipients": ["kt@shop.vn"]})
-email = config["pending_verification"][0]
-code = ask_user_for_code(email)
-mona.email_configs.verify(config["id"], email, code)
-mona.email_configs.test(config["id"])
-print(mona.email_logs.list(config_id=config["id"], status="sent"))
-```
-
-Địa chỉ bounce hoặc khiếu nại nằm trong `email_suppressions.list()`; chỉ gọi `email_suppressions.remove(email)` sau khi đã sửa nguyên nhân.
-
-Đọc hết các trang giao dịch:
+### Transactions
 
 ```python
 for tx in mona.iter_transactions("MONA0000010234", limit=100):
     print(tx["transaction_code"], tx["amount"])
+
+mona.transactions.retry("transaction-id", "WEBHOOK", target_id="webhook-config-id")
 ```
 
-## Xác thực webhook
+### Webhooks
 
-Luôn truyền đúng `request.body` dạng bytes, không parse rồi encode lại.
+Register an HMAC webhook:
+
+```python
+mona.webhooks.create({
+    "name": "Web ban hang",
+    "webhook_url": "https://shop.example/webhooks/monapay",
+    "auth_type": "HMAC_SHA256",
+    "secret_key": os.environ["MONA_WEBHOOK_SECRET"],
+    "payload_format": "application/json",
+})
+```
+
+Verify incoming requests against the raw request body as `bytes`. Do not parse and re-encode it: the signature covers the exact request bytes. `verify_webhook` reads the `X-Mona-Timestamp` and `X-Mona-Signature` headers and rejects timestamps older than `tolerance` seconds (default 300).
 
 ```python
 from monapay import verify_webhook
@@ -149,18 +162,45 @@ if not result.ok:
 save_once(result.payload["transaction_code"], result.payload)
 ```
 
-Ví dụ nhận webhook cho Flask, FastAPI và Django nằm trong `examples/`. Dùng `transaction_code` làm unique key để chống xử lý trùng.
+Flask, FastAPI and Django handlers are in `examples/`. Store `transaction_code` under a unique constraint so redelivered webhooks are not processed twice.
 
-Tài liệu: https://monapay.vn/docs · AI/LLM: https://monapay.vn/llms.txt · Hotline 1900 636 648 · info@themona.global
+### Email notifications
 
-## Test
+MONA Pay sends a 6-digit code to each new address. Ask the user for the code from their inbox, then verify it.
 
-Từ thư mục gói:
-
-```bash
-python -m pytest tests
+```python
+config = mona.email_configs.create({"name": "Accounting", "recipients": ["accounting@shop.example"]})
+email = config["pending_verification"][0]
+code = ask_user_for_code(email)
+mona.email_configs.verify(config["id"], email, code)
+mona.email_configs.test(config["id"])
+print(mona.email_logs.list(config_id=config["id"], status="sent"))
 ```
 
-License MIT.
+Bounced or complained addresses appear in `email_suppressions.list()`. Call `email_suppressions.remove(email)` only after fixing the cause.
 
-**MONA Pay thuộc bộ MONA Cloud của The MONA Group.**
+## Configuration
+
+`MonaPay.from_env()` reads:
+
+| Variable | Purpose |
+| --- | --- |
+| `MONAPAY_CLIENT_ID`, `MONAPAY_CLIENT_SECRET` | API key credentials (preferred) |
+| `MONAPAY_USERNAME`, `MONAPAY_PASSWORD` | Legacy password login; does not work for accounts with 2FA enabled |
+| `MONAPAY_BASE_URL` | API base URL, defaults to `https://api.monapay.vn` |
+
+The examples above also use `MONA_WEBHOOK_SECRET` for the webhook signing secret.
+
+Documentation: https://monapay.vn/docs
+
+## Development
+
+```bash
+python -m unittest discover tests
+```
+
+## License
+
+MIT
+
+**MONA Pay is part of MONA Cloud by The MONA Group.**
