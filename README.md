@@ -162,3 +162,5 @@ python -m pytest tests
 ```
 
 License MIT.
+
+**MONA Pay thuộc bộ MONA Cloud của The MONA Group.**

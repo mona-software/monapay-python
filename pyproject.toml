@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "monapay"
-version = "0.5.1"
+version = "0.5.2"
 description = "SDK Python zero-dependency cho MONA Pay"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
-authors = [{ name = "The MONA Group", email = "info@themona.global" }]
+authors = [{ name = "MONA Software", email = "info@themona.global" }]
 keywords = ["monapay", "vietqr", "virtual-account", "payment", "webhook", "email"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -19,8 +19,9 @@ classifiers = [
 ]
 
 [project.urls]
+Homepage = "https://monapay.vn"
 Documentation = "https://monapay.vn/docs"
-Repository = "https://github.com/monapay/monapay-python"
+Repository = "https://github.com/mona-software/monapay-python"
 
 [tool.setuptools.packages.find]
 include = ["monapay*"]
